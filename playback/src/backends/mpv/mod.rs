@@ -255,11 +255,15 @@ impl MpvBackend {
     fn handle_internal_cmd(cmd: PlayerInternalCmd, mpv: &Mpv, cmd_tx: &crate::PlayerCmdSender) {
         match cmd {
             PlayerInternalCmd::Play(new) => {
+                // mpv's command-string parser mishandles backslashes (as on Windows paths)
+                // even inside quotes; forward slashes are accepted on Windows too.
+                let new = new.replace('\\', "/");
                 let _ = mpv.command("loadfile", &[&format!("\"{new}\""), "replace"]);
                 // mpv persists pause state across file loads
                 let _ = mpv.unpause();
             }
             PlayerInternalCmd::QueueNext(next) => {
+                let next = next.replace('\\', "/");
                 let _ = mpv.command("loadfile", &[&format!("\"{next}\""), "append"]);
             }
             PlayerInternalCmd::Volume(volume) => {

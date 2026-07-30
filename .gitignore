@@ -1,6 +1,8 @@
 /target
 /graphify-out
 *.diff
+# fetched by scripts/setup-mpv-windows.ps1, not committed (~116MB dll)
+/vendor/mpv-windows
 # ignore custom cargo configuration, like changing linker
 .cargo
 # VSCode relation configuration

@@ -99,7 +99,7 @@ All the packages here can be installed via various sources, for ease of install 
 |          `Google.Protobuf`          |                                           |    X     |        X        |                    | communication protocol between server and client(tui) |          |
 |              `yt-dlp`               |                                           |          |                 |                    |                 Download some tracks                  |          |
 |              `ffmpeg`               |                                           |          |                 |                    |             Post-Processing for `yt-dlp`              |          |
-|               unknown               |                                           |          |                 |       `mpv`        |                      MPV Backend                      |          |
+|         *see below*                 |                                           |          |                 |       `mpv`        |                      MPV Backend                      |          |
 |               unknown               |                                           |          |                 |       `gst`        |                   Gstreamer Backend                   |          |
 |             unavailable             | [libopus official site][libopus-download] |    X     |                 |  `rusty-libopus`   |          Opus codec support in rusty backend          | `1.89.0` |
 |          *see list below*           |                                           |          |        X        | `rusty-soundtouch` |       Soundtouch requires linking to libstdc++        |          |
@@ -122,6 +122,36 @@ If you actually still wanted to compile this yourself, you will need:
   Instead, simply install `llvm` via `winget`: `winget install llvm`
 
 This should be everything and feature `rusty-soundtouch` should compile without problems.
+
+##### Windows `mpv`
+
+libmpv Windows dev builds (headers + import lib + dll) are published at
+[sourceforge.net/projects/mpv-player-windows/files/libmpv][mpv-windows-dev], but:
+
+- The download is gated behind a Cloudflare bot challenge that blocks non-browser
+  clients (curl, aria2, `Invoke-WebRequest`) — grab it in an actual browser.
+- The package ships a MinGW-format import lib (`libmpv.dll.a`), which the MSVC
+  linker cannot read. An MSVC-format `mpv.lib` has to be generated from the
+  dll's export table (`dumpbin /exports` + `lib.exe /def:...`).
+
+To skip all of that, run:
+
+```powershell
+.\scripts\setup-mpv-windows.ps1
+```
+
+This downloads a pre-processed package (already containing a working `mpv.lib`)
+from a GitHub Release and drops it in `vendor/mpv-windows/`, where
+[`playback/build.rs`](./playback/build.rs) picks it up automatically — no env
+vars needed. Then build normally:
+
+```powershell
+cargo build --release -p termusic-server --features mpv
+```
+
+Note the vendored `libmpv-2.dll` requires an AVX2-capable CPU (x86-64-v3).
+
+[mpv-windows-dev]: <https://sourceforge.net/projects/mpv-player-windows/files/libmpv/>
 
 #### Backends
 
