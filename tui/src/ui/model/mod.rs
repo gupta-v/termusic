@@ -319,6 +319,14 @@ pub struct Model {
     pub ueberzug_instance: Option<UeInstance>,
     pub viuer_supported: ViuerSupported,
     pub xywh: xywh::Xywh,
+    /// Fixed screen-space rect the cover art panel occupies in [`TermusicLayout::TreeView`],
+    /// set each draw. When present, [`Model::show_image`] fits the image into it directly
+    /// instead of the floating `xywh` percentage-of-terminal placement.
+    pub cover_area: Option<tuirealm::ratatui::layout::Rect>,
+    /// `true` when the current track has no cover art to show (neither embedded nor a sidecar
+    /// thumbnail), so the Cover panel should render a "TwT" placeholder instead of leaving
+    /// the previous track's image lingering on screen.
+    pub cover_placeholder: bool,
 
     youtube_options: YoutubeOptions,
     pub download_tracker: DownloadTracker,
@@ -467,6 +475,8 @@ impl Model {
             playback: Playback::new(),
             cmd_to_server_tx,
             xywh,
+            cover_area: None,
+            cover_placeholder: true,
         };
 
         model.new_library_scan_dir(path, None);
@@ -554,6 +564,7 @@ impl Model {
         self.progress_update_title();
         self.lyric_update_title();
         self.lyric_update();
+        self.track_details_update();
         self.update_playing_song();
     }
 

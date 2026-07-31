@@ -1,7 +1,7 @@
 //! The actual Music Library Component Implementation
 
 use std::{
-    cell::OnceCell,
+    cell::{Cell, OnceCell},
     fs::rename,
     num::NonZeroUsize,
     path::{Path, PathBuf},
@@ -54,6 +54,10 @@ pub struct MusicLibData {
     /// Lazily evaluated from `path`, only when it becomes necessary.
     // TODO: evaluate if it would be more performant to only cache if `path.file_name().to_str_lossy()` returns `Cow::Owned`.
     as_str: OnceCell<String>,
+    /// Marquee-scroll position, in characters. Only ever nonzero for the currently-selected
+    /// node (see `OrxMusicLibraryComponent::on`'s `Event::Tick` handling), so this doubles as
+    /// the "is this the node being scrolled" flag for `render`.
+    scroll_offset: Cell<usize>,
 }
 
 impl MusicLibData {
@@ -74,6 +78,7 @@ impl MusicLibData {
             is_loading: false,
             is_error: false,
             as_str: OnceCell::default(),
+            scroll_offset: Cell::new(0),
         }
     }
 }
@@ -87,6 +92,9 @@ const LOADING_SYMBOL: &str = "\u{27F3}";
 /// It should look like "✕" (Multiplication) chosen for being 1 draw width.
 const ERROR_SYMBOL: &str = "\u{2715}";
 
+/// Gap shown between the end and the looped-back start of a marquee-scrolled name.
+const MARQUEE_GAP: &str = "   ";
+
 impl NodeValue for MusicLibData {
     fn render(&self, buf: &mut Buffer, area: Rect, offset: usize, style: Style) {
         // Unwrap should never panic here as we already check the case of there not being a file_name on instance creation.
@@ -95,7 +103,24 @@ impl NodeValue for MusicLibData {
             .as_str
             .get_or_init(|| self.path.file_name().unwrap().to_string_lossy().to_string());
 
-        NodeValue::render(res, buf, area, offset, style);
+        // `scroll_offset` is only ever nonzero for the currently-selected node (see
+        // `OrxMusicLibraryComponent::on`'s `Event::Tick` handling), and only actually needed
+        // when the name doesn't fit in the given area - otherwise render it plainly.
+        let scroll = self.scroll_offset.get();
+        if scroll == 0 || res.chars().count() <= area.width as usize {
+            NodeValue::render(res, buf, area, offset, style);
+            return;
+        }
+
+        let looped = format!("{res}{MARQUEE_GAP}");
+        let char_len = looped.chars().count();
+        let byte_offset = looped
+            .char_indices()
+            .nth(scroll % char_len)
+            .map_or(0, |(b, _)| b);
+        let rotated = format!("{}{}", &looped[byte_offset..], &looped[..byte_offset]);
+
+        NodeValue::render(&rotated, buf, area, offset, style);
     }
 
     fn render_with_indicators(
@@ -743,6 +768,15 @@ impl AppComponent<Msg, UserEvent> for OrxMusicLibraryComponent {
     fn on(&mut self, ev: &Event<UserEvent>) -> Option<Msg> {
         if let Event::User(UserEvent::Forward(Msg::Library(ev))) = ev {
             return self.handle_user_events(ev);
+        }
+
+        // Advance the marquee-scroll of the currently-selected row's name (see
+        // `MusicLibData::render`), one character per tick.
+        if matches!(ev, Event::Tick) {
+            let node = self.component.get_current_selected_node()?;
+            let data = node.data();
+            data.scroll_offset.set(data.scroll_offset.get() + 1);
+            return Some(Msg::ForceRedraw);
         }
 
         let config = self.config.clone();

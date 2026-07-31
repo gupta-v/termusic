@@ -2,7 +2,6 @@ use std::sync::LazyLock;
 
 use anyhow::{Result, anyhow};
 use regex::Regex;
-use termusiclib::common::const_unknown::{UNKNOWN_ARTIST, UNKNOWN_TITLE};
 use termusiclib::config::SharedTuiSettings;
 use termusiclib::player::RunningStatus;
 use termusiclib::podcast::episode::Episode;
@@ -428,11 +427,9 @@ impl Model {
         let track = track.unwrap();
 
         let lyric_title = match track.inner() {
-            MediaTypes::Track(_track_data) => {
-                let artist = track.artist().unwrap_or(UNKNOWN_ARTIST);
-                let title = track.title().unwrap_or(UNKNOWN_TITLE);
-                format!(" Lyrics of {artist:^.20} - {title:^.20} ")
-            }
+            // Artist/title are already shown in the Details panel; keep this narrow panel's
+            // title short so it doesn't eat space needed for the actual lyric text.
+            MediaTypes::Track(_track_data) => " Lyrics ".to_string(),
             MediaTypes::Radio(_radio_track_data) => " Live Radio ".to_string(),
             MediaTypes::Podcast(_podcast_track_data) => Self::LYRIC_PODCAST_TITLE.to_string(),
         };
@@ -445,7 +442,7 @@ impl Model {
             .attr(
                 &Id::Lyric,
                 Attribute::Title,
-                AttrValue::Title(Title::from(lyric_title).alignment(HorizontalAlignment::Center)),
+                AttrValue::Title(Title::from(lyric_title).alignment(HorizontalAlignment::Left)),
             )
             .ok();
     }

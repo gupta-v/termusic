@@ -8,3 +8,6 @@
 # VSCode relation configuration
 .vscode
 .cortexkit/
+# build logs from ad-hoc local builds, not meant to be committed
+/logs/
+/dist/

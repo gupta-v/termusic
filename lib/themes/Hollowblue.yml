@@ -1,0 +1,27 @@
+colors:
+  name: Hollowblue
+  author: gupta-v
+  primary:
+    background: "#000000"
+    foreground: "#f2ede0"
+  cursor:
+    text: "#000000"
+    cursor: "#34d399"
+  normal:
+    black: "#000000"
+    red: "#f28b6e"
+    green: "#10b981"
+    yellow: "#d8c8a0"
+    blue: "#22c3e6"
+    magenta: "#a78bfa"
+    cyan: "#2dd4bf"
+    white: "#f2ede0"
+  bright:
+    black: "#242424"
+    red: "#ffab91"
+    green: "#6ee7b7"
+    yellow: "#ecdfc0"
+    blue: "#67e8f9"
+    magenta: "#c4b5fd"
+    cyan: "#99f6e4"
+    white: "#ffffff"

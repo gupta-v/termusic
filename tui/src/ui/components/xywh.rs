@@ -15,12 +15,27 @@ use std::io::Write;
 use anyhow::Context;
 use anyhow::Result;
 use image::DynamicImage;
+use std::path::{Path, PathBuf};
 use termusiclib::track::MediaTypes;
 use tokio::runtime::Handle;
+use tuirealm::ratatui::layout::Rect;
 
 use crate::ui::ids::{Id, IdConfigEditor, IdTagEditor};
 use crate::ui::model::{Model, TxToMain, ViuerSupported};
 use crate::ui::msg::{CoverDLResult, ImageWrapper, Msg, XYWHMsg};
+
+/// Look for a `.yt-thumbnails/<same-stem>.<ext>` file next to `track_path`, matching the
+/// output template used for yt-dlp downloads (see `youtube_options.rs`).
+fn sidecar_thumbnail_path(track_path: &Path) -> Option<PathBuf> {
+    let parent = track_path.parent()?;
+    let stem = track_path.file_stem()?.to_string_lossy();
+    let thumb_dir = parent.join(".yt-thumbnails");
+
+    ["webp", "jpg", "jpeg", "png"]
+        .iter()
+        .map(|ext| thumb_dir.join(format!("{stem}.{ext}")))
+        .find(|candidate| candidate.is_file())
+}
 
 impl Model {
     pub fn xywh_move_left(&mut self) {
@@ -96,6 +111,19 @@ impl Model {
         false
     }
 
+    /// Overwrite whatever is currently drawn in the Cover panel with a blank opaque image.
+    ///
+    /// Only meaningful in the TreeView layout (where `cover_area` is set); other layouts
+    /// don't have a dedicated Cover panel to correspond to, so this is a no-op there.
+    fn clear_cover_pixels(&mut self) -> Result<()> {
+        if self.cover_area.is_none() {
+            return Ok(());
+        }
+        // No alpha channel, so it can never be treated as "transparent, skip drawing".
+        let blank = DynamicImage::new_rgb8(2, 2);
+        self.show_image(&blank)
+    }
+
     /// Get and show a image for the current playing media
     ///
     /// Requires that the current thread has a entered runtime
@@ -105,10 +133,22 @@ impl Model {
             return Ok(());
         }
         self.clear_photo()?;
+        // Assume no cover until one of the branches below actually shows one; this also
+        // covers "should_not_show_photo" / "no track" / "no picture found" cases uniformly,
+        // so the Cover panel never keeps showing a stale previous track's art.
+        self.cover_placeholder = true;
 
         if self.should_not_show_photo() {
             return Ok(());
         }
+
+        // Protocol renderers (sixel/kitty/iterm) composite graphics independently of
+        // ratatui's own text-cell redraw, so a leftover image from the previous track isn't
+        // actually erased just because a "TwT" placeholder gets drawn as text on top of it
+        // (see `view_layout_treeview`). Overwrite it with a blank opaque image first; if a
+        // real cover gets found below, it simply overdraws this immediately after.
+        self.clear_cover_pixels()?;
+
         let Some(track) = self.playback.current_track() else {
             return Ok(());
         };
@@ -130,6 +170,18 @@ impl Model {
                     && let Ok(image) = image::load_from_memory(picture.data())
                 {
                     self.show_image(&image)?;
+                    self.cover_placeholder = false;
+                    return Ok(());
+                }
+
+                // No embedded picture - e.g. yt-dlp opus downloads deliberately skip
+                // `--embed-thumbnail` (it corrupts the Ogg container for lofty). Fall back to
+                // the sibling thumbnail file yt-dlp wrote alongside the track instead.
+                if let Some(thumb_path) = sidecar_thumbnail_path(track_data.path())
+                    && let Ok(image) = image::open(&thumb_path)
+                {
+                    self.show_image(&image)?;
+                    self.cover_placeholder = false;
                     return Ok(());
                 }
             }
@@ -230,6 +282,12 @@ impl Model {
 
     #[allow(clippy::cast_possible_truncation, clippy::unnecessary_wraps)]
     pub fn show_image(&mut self, img: &DynamicImage) -> Result<()> {
+        // In the TreeView layout the cover art gets a dedicated bordered panel
+        // (top-right, 30%h x 20%w) instead of a floating xywh-percentage overlay.
+        if let Some(area) = self.cover_area {
+            return self.show_image_fixed(img, area);
+        }
+
         #[allow(unused_variables)]
         let xywh = self.xywh.update_size(img)?;
 
@@ -237,7 +295,7 @@ impl Model {
         match self.viuer_supported {
             ViuerSupported::NotSupported => {
                 #[cfg(all(feature = "cover-ueberzug", not(target_os = "windows")))]
-                if let Some(instance) = self.ueberzug_instance.as_mut() {
+                let drew_with_ueberzug = if let Some(instance) = self.ueberzug_instance.as_mut() {
                     let mut cache_file = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
                     cache_file.push("termusic");
                     if !cache_file.exists() {
@@ -251,6 +309,28 @@ impl Model {
                     if let Some(file) = cache_file.as_path().to_str() {
                         instance.draw_cover_ueberzug(file, &xywh, false)?;
                     }
+                    true
+                } else {
+                    false
+                };
+                #[cfg(not(all(feature = "cover-ueberzug", not(target_os = "windows"))))]
+                let drew_with_ueberzug = false;
+
+                // No protocol-specific rendering (sixel/kitty/iterm2/ueberzug) available
+                // (e.g. plain Windows Terminal/conhost): fall back to viuer's built-in ANSI
+                // truecolor half-block renderer, which needs no special terminal support
+                // beyond 24-bit color.
+                if !drew_with_ueberzug {
+                    let config = viuer::Config {
+                        transparent: true,
+                        absolute_offset: true,
+                        x: xywh.x as u16,
+                        y: xywh.y as i16,
+                        width: Some(xywh.width),
+                        height: None,
+                        ..viuer::Config::default()
+                    };
+                    viuer::print(img, &config).context("viuer::print")?;
                 }
             }
             #[cfg(any(
@@ -279,6 +359,45 @@ impl Model {
             }
         }
 
+        Ok(())
+    }
+
+    /// Fit `img` into a fixed screen-space rect (the TreeView layout's cover panel),
+    /// instead of the floating xywh-percentage placement used by [`Self::show_image`].
+    #[allow(
+        clippy::unnecessary_wraps,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
+    fn show_image_fixed(&mut self, img: &DynamicImage, area: Rect) -> Result<()> {
+        // Protocol renderers (sixel/kitty/iterm) assume a fixed pixels-per-cell ratio that
+        // often doesn't match the terminal's actual font metrics, leaving a visible gap
+        // around the image. Overscan a bit to compensate; the plain ANSI block fallback has
+        // no such mismatch (it uses real character cells 1:1), so keep it exact there.
+        let overscan = if self.viuer_supported == ViuerSupported::NotSupported {
+            1.0
+        } else {
+            1.69
+        };
+        let width = (f64::from(area.width) * overscan).round() as u32;
+        let height = (f64::from(area.height) * overscan).round() as u32;
+
+        let config = viuer::Config {
+            transparent: true,
+            absolute_offset: true,
+            x: area.x,
+            y: area.y as i16,
+            width: Some(width),
+            height: Some(height),
+            #[cfg(feature = "cover-viuer-iterm")]
+            use_iterm: self.viuer_supported == ViuerSupported::ITerm,
+            #[cfg(feature = "cover-viuer-kitty")]
+            use_kitty: self.viuer_supported == ViuerSupported::Kitty,
+            #[cfg(feature = "cover-viuer-sixel")]
+            use_sixel: self.viuer_supported == ViuerSupported::Sixel,
+            ..viuer::Config::default()
+        };
+        viuer::print(img, &config).context("viuer::print")?;
         Ok(())
     }
 

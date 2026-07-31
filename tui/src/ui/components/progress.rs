@@ -2,9 +2,9 @@ use std::ops::Div;
 use std::time::Duration;
 
 use termusiclib::config::TuiOverlay;
+use termusiclib::config::v2::server::LoopMode;
 use termusiclib::player::RunningStatus;
 use termusiclib::track::DurationFmtShort;
-use termusiclib::track::MediaTypesSimple;
 use tui_realm_stdlib::components::Gauge;
 use tuirealm::component::AppComponent;
 use tuirealm::component::Component;
@@ -41,8 +41,8 @@ impl Progress {
                 .inactive(Style::new().fg(config.settings.theme.progress_foreground()))
                 .label("Progress")
                 .title(
-                    Title::from(" Status: Stopped | Volume: ?? | Speed: ??.? ")
-                        .alignment(HorizontalAlignment::Center),
+                    Title::from("\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} Stopped ")
+                        .alignment(HorizontalAlignment::Left),
                 )
                 .progress(0.0),
         }
@@ -55,34 +55,51 @@ impl AppComponent<Msg, UserEvent> for Progress {
     }
 }
 
-#[allow(clippy::cast_precision_loss)] // speed is never realisitcally expected to be above i16::MAX
-fn title_format(
-    status: RunningStatus,
-    title: Option<&str>,
-    volume: u16,
-    speed: i32,
-    gapless: bool,
-) -> String {
-    let gapless = if gapless { "True" } else { "False" };
+/// `1` when the loop mode currently shuffles track order, `0` otherwise.
+fn shuffle_str(loop_mode: LoopMode) -> &'static str {
+    if loop_mode == LoopMode::Random { "1" } else { "0" }
+}
 
-    if let Some(title) = title {
-        format!(
-            " Status: {} {:^.20} | Volume: {} | Speed: {:^.1} | Gapless: {} ",
-            status,
-            title,
-            volume,
-            speed as f32 / 10.0,
-            gapless,
-        )
-    } else {
-        format!(
-            " Status: {} | Volume: {} | Speed: {:^.1} | Gapless: {} ",
-            status,
-            volume,
-            speed as f32 / 10.0,
-            gapless,
-        )
+/// Repeat state as a 2-bit binary string: `0` = no repeat, `1` = repeat single track,
+/// `10` = repeat playlist (binary for 2, not decimal ten).
+fn repeat_str(loop_mode: LoopMode) -> &'static str {
+    match loop_mode {
+        LoopMode::Track => "1",
+        LoopMode::Playlist => "10",
+        LoopMode::Random | LoopMode::PlaylistOnce => "0",
     }
+}
+
+/// Render volume (0-100) as a fixed-width `[=====     ]` ASCII bar.
+fn volume_bar(volume: u16, width: usize) -> String {
+    let filled = (usize::from(volume).min(100) * width) / 100;
+    format!("[{}{}]", "=".repeat(filled), " ".repeat(width - filled))
+}
+
+/// Left (70%) status text: just what's playing.
+fn title_format(status: RunningStatus, title: Option<&str>) -> String {
+    const LEFT_PAD: &str = "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"; // matches the rounded border's line character, instead of blank space
+    match (status, title) {
+        (RunningStatus::Running, Some(title)) => format!("{LEFT_PAD} Playing: {title:.30} "),
+        (RunningStatus::Paused, Some(title)) => format!("{LEFT_PAD} Paused: {title:.30} "),
+        (RunningStatus::Stopped, _) | (_, None) => format!("{LEFT_PAD} Stopped "),
+    }
+}
+
+/// Right (30%, "Controls") status text: speed/shuffle/repeat/volume, single line.
+#[allow(clippy::cast_precision_loss)] // speed is never realisitcally expected to be above i16::MAX
+fn status_right_format(volume: u16, speed: i32, loop_mode: LoopMode) -> String {
+    let shuffle = shuffle_str(loop_mode);
+    let repeat = repeat_str(loop_mode);
+    let volume = volume_bar(volume, 10);
+
+    format!(
+        "Speed:{:^.1}x | Shuf:{} | Rpt:{} | Vol:{}",
+        speed as f32 / 10.0,
+        shuffle,
+        repeat,
+        volume,
+    )
 }
 
 impl Model {
@@ -111,38 +128,23 @@ impl Model {
         let config_server = self.config_server.read();
         let player = &config_server.settings.player;
 
-        let progress_title = if let Some(track) = self.playback.current_track() {
-            match track.media_type() {
-                MediaTypesSimple::Music | MediaTypesSimple::LiveRadio => title_format(
-                    self.playback.status(),
-                    None,
-                    player.volume,
-                    player.speed,
-                    player.gapless,
-                ),
-                MediaTypesSimple::Podcast => title_format(
-                    self.playback.status(),
-                    Some(track.title().unwrap_or("Unknown title")),
-                    player.volume,
-                    player.speed,
-                    player.gapless,
-                ),
-            }
-        } else {
-            title_format(
-                self.playback.status(),
-                None,
-                player.volume,
-                player.speed,
-                player.gapless,
-            )
-        };
+        let title = self
+            .playback
+            .current_track()
+            .map(|track| track.title().unwrap_or("Unknown title").to_string());
+        let progress_title = title_format(self.playback.status(), title.as_deref());
+        let status_right = status_right_format(player.volume, player.speed, player.loop_mode);
 
         drop(config_server);
         let _ = self.app.attr(
             &Id::Progress,
             Attribute::Title,
-            AttrValue::Title(Title::from(progress_title).alignment(HorizontalAlignment::Center)),
+            AttrValue::Title(Title::from(progress_title).alignment(HorizontalAlignment::Left)),
+        );
+        let _ = self.app.attr(
+            &Id::StatusRight,
+            Attribute::Text,
+            AttrValue::String(status_right),
         );
 
         self.force_redraw();

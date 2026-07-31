@@ -26,6 +26,8 @@ pub enum Id {
     FeedDeleteConfirmRadioPopup,
     FeedDeleteConfirmInputPopup,
     Progress,
+    StatusRight,
+    TrackDetails,
     QuitPopup,
     SavePlaylistPopup,
     SavePlaylistLabel,

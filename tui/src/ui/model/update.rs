@@ -164,7 +164,9 @@ impl Model {
             }
             XYWHMsg::CoverDLResult(msg) => match msg {
                 CoverDLResult::FetchPhotoSuccess(image_wrapper) => {
-                    self.show_image(&image_wrapper.data).ok();
+                    if self.show_image(&image_wrapper.data).is_ok() {
+                        self.cover_placeholder = false;
+                    }
                 }
                 CoverDLResult::FetchPhotoErr(err_text) => {
                     self.show_message_timeout_label_help(err_text, None, None, None);
@@ -382,7 +384,8 @@ impl Model {
                 }
                 self.download_tracker.decrease_one(&ep_data.url);
                 self.show_message_timeout_label_help(
-                    self.download_tracker.message_download_complete(),
+                    self.download_tracker
+                        .message_download_complete(Some(&ep_data.title)),
                     None,
                     None,
                     None,
@@ -749,7 +752,7 @@ impl Model {
                     assert!(self.app.umount(&Id::YoutubeSearchInputPopup).is_ok());
                 }
                 if url.starts_with("http") {
-                    match self.youtube_dl(&url, &current_node) {
+                    match self.youtube_dl(&url, "YouTube Download", &current_node) {
                         Ok(()) => {}
                         Err(e) => {
                             self.mount_error_popup(e.context("youtube-dl download"));
@@ -769,15 +772,9 @@ impl Model {
             YSMsg::ReqPreviousPage => {
                 self.youtube_options_prev_page();
             }
-            YSMsg::PageLoaded(data) => {
-                self.youtube_options.data = data;
-                self.sync_youtube_options();
-            }
-            YSMsg::PageLoadError(err) => {
-                self.mount_error_popup(anyhow!(err));
-            }
 
             YSMsg::TablePopupCloseOk(index, current_node) => {
+                self.umount_youtube_search_table_popup();
                 if let Err(e) = self.youtube_options_download(index, &current_node) {
                     self.mount_error_popup(e.context("youtube-dl options download"));
                 }
@@ -807,10 +804,10 @@ impl Model {
                     None,
                 );
             }
-            YTDLMsg::Success(url) => {
+            YTDLMsg::Success(url, title) => {
                 self.download_tracker.decrease_one(&url);
                 self.show_message_timeout_label_help(
-                    self.download_tracker.message_download_complete(),
+                    self.download_tracker.message_download_complete(Some(&title)),
                     None,
                     None,
                     None,
@@ -1039,17 +1036,10 @@ impl Model {
         }
     }
 
-    // show a popup for playing song
+    // The playing song's name is already shown in the status bar / details panel, so
+    // this no longer pops up a "Currently Playing" toast; it just keeps the playlist synced.
     pub fn update_playing_song(&mut self) {
-        if let Some(track) = self.playback.current_track() {
-            if self.layout == TermusicLayout::Podcast {
-                let title = track.title().unwrap_or("Unknown Episode");
-                self.update_show_message_timeout("Currently Playing", title, None);
-                return;
-            }
-            let name = track.title().map_or_else(|| track.id_str(), Into::into);
-            self.update_show_message_timeout("Currently Playing", &name, None);
-
+        if self.playback.current_track().is_some() && self.layout != TermusicLayout::Podcast {
             self.playlist_sync();
         }
     }
@@ -1203,6 +1193,7 @@ impl Model {
 
                 self.progress_update_title();
                 self.lyric_update_title();
+                self.track_details_update();
             }
             UpdateEvents::TrackChanged(track_changed_info) => {
                 if let Some(progress) = track_changed_info.progress {

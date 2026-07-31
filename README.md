@@ -1,9 +1,11 @@
 # Terminal Music and Podcast Player written in Rust
 
-[![Build status](https://github.com/tramhao/termusic/actions/workflows/build.yml/badge.svg)](https://github.com/tramhao/termusic/actions)
-[![crates.io](https://img.shields.io/crates/v/termusic.svg)](https://crates.io/crates/termusic)
-[![dependency status](https://deps.rs/repo/github/tramhao/termusic/status.svg)](https://deps.rs/repo/github/tramhao/termusic)
 [![MSRV](https://img.shields.io/badge/MSRV-1.90.0-blue)](https://releases.rs/docs/1.90.0/)
+
+> Personal fork of [tramhao/termusic](https://github.com/tramhao/termusic) — not published to
+> crates.io or any package manager. Build from source (see below). The upstream project's
+> badges/install methods (cargo, Homebrew, AUR, etc.) are removed here since they'd point to
+> the wrong package.
 
 Listen to music and podcasts freely as both in freedom and free of charge!
 
@@ -27,6 +29,21 @@ No need to register for monthly paid memberships.
 
 As a contributor of [GOMU](https://github.com/issadarkthing/gomu), I met serious problems during development. The main problem is data race condition.
 So I rewrote the player in rust, and hope to solve the problem.
+
+## About this fork
+
+Maintained by [gupta-v](https://github.com/gupta-v). Notable changes from upstream:
+
+- Windows `mpv` backend support, with a one-shot setup script
+  (`scripts/setup-windows.ps1`, see [`documentation/setup-docs.md`](./documentation/setup-docs.md))
+  that handles the Cloudflare-gated download and MinGW/MSVC import-lib mismatch upstream's
+  Windows builds otherwise require fixing by hand.
+- Redesigned TUI layout (Library / Playlist / Cover art / Track details / Lyrics panels,
+  plus a persistent status bar with volume/shuffle/repeat).
+- `yt-dlp`-backed YouTube search (no dependency on public Invidious mirrors, which are
+  frequently rate-limited or blocked) with corrected Opus/Vorbis-comment tagging.
+- Assorted correctness fixes: Windows path handling for the `mpv` backend and the local
+  track database, library-scan filtering, and cover-art rendering.
 
 ## Supported Formats
 
@@ -73,6 +90,11 @@ Note that using non-default features might increase the MSRV.
 
 ##### Linux
 
+**Quick setup:** `./scripts/setup-unix.sh` handles everything below in one go (Rust, protoc,
+build tools, libmpv, build, and config; also works on macOS) — see
+[`documentation/setup-docs.md`](./documentation/setup-docs.md) for details, or read on for
+the manual steps.
+
 | Package name (ubuntu) | Package name (arch) | Required | Build-time-only |      Feature       |                      Description                      |   MSRV   |
 | :-------------------: | :-----------------: | :------: | :-------------: | :----------------: | :---------------------------------------------------: | :------: |
 |         `git`         |        `git`        |    X     |        X        |                    |                    version control                    |          |
@@ -89,6 +111,11 @@ Note that using non-default features might increase the MSRV.
 |     `libstdc++6`      |     `gcc-libs`      |          |                 | `rusty-soundtouch` |       Soundtouch requires linking to libstdc++        |          |
 
 #### Windows
+
+**Quick setup:** `.\scripts\setup-windows.ps1` handles everything below in one go (Scoop,
+Rust, protoc, MSVC Build Tools, libmpv, build, and config) — see
+[`documentation/setup-docs.md`](./documentation/setup-docs.md) for details, or read on
+for the manual steps.
 
 All the packages here can be installed via various sources, for ease of install the `winget` package name is listed.
 
@@ -223,27 +250,15 @@ The default log level is `WARNING` (can be changed via [`RUST_LOG`](https://docs
 
 Note that log files are only created on the first log line to be saved.
 
-### Official Install Sources
-
-#### Cargo
-
-```bash
-cargo install termusic termusic-server --locked
-```
-
-#### cargo-binstall
-
-```bash
-cargo binstall termusic termusic-server
-```
-
 ### From Source
 
 ```bash
-git clone https://github.com/tramhao/termusic.git
+git clone https://github.com/gupta-v/termusic.git
 cd termusic
 make
 ```
+
+On Windows, see [Quick setup](#windows) above instead — `make` isn't used there.
 
 Then install with:
 
@@ -271,82 +286,6 @@ To build with all backends and all cover protocols without copying binaries else
 ```bash
 make all-backends
 ```
-
-### Unofficial Install Sources
-
-The following are ways to install termusic, but may differ in configuration and support.
-
-They are not maintained by the termusic project itself.
-
-#### Arch Linux
-
-Arch Linux users can install `termusic` from the [official repositories](https://archlinux.org/packages/extra/x86_64/termusic) using [pacman](https://wiki.archlinux.org/title/pacman).
-
-```bash
-pacman -S termusic
-```
-
-#### Arch Linux GIT (AUR)
-
-Arch Linux users can install [`termusic-git` from the AUR](https://aur.archlinux.org/packages/termusic-git) using [pamac](https://aur.archlinux.org/packages/pamac-cli) or any other [AUR helper](https://wiki.archlinux.org/title/AUR_helpers).
-
-```bash
-pamac install termusic-git
-```
-
-#### macOS
-
-macOS users can install termusic from [Homebrew](https://brew.sh/) through its [Formula](https://formulae.brew.sh/formula/termusic)
-
-```bash
-brew install termusic
-```
-
-#### NetBSD
-
-NetBSD users can install `termusic` from the official repositories.
-
-```bash
-pkgin install termusic
-```
-
-#### Nix/NixOS
-
-Either in the user's environment:
-
-```bash
-nix-env --install termusic
-```
-
-Or declaratively in `/etc/nixos/configuration.nix`:
-
-```nix
-{
-    environment.systemPackagess = with pkgs; [
-      ...
-      termusic
-    ];
-}
-```
-
-### Availability
-
-[![Packaging status](https://repology.org/badge/vertical-allrepos/termusic.svg?columns=2)](https://repology.org/project/termusic/versions)
-
-## TODO
-
-- [ ] Better interface to adjust timestamp of lyric.
-- [ ] Rating and sync support.
-- [x] Multiple root and easy switch.
-- [x] Save playlists.
-- [x] Listen to rss feeds/Podcasts. Need a new layout.
-
-## Contributing and issues 🤝🏻
-
-Contributions, bug reports, new features and questions are welcome! 😉
-If you have any question or concern, or you want to suggest a new feature, or you want just want to improve termusic, feel free to open an issue or a PR.
-
-Please follow [our contributing guidelines](CONTRIBUTING.md)
 
 ## Contributors
 

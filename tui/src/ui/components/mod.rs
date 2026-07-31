@@ -18,7 +18,9 @@ mod raw;
     clippy::module_name_repetitions
 )]
 /// Tag Editor Controls
+mod status_right;
 mod tag_editor;
+mod track_details;
 mod vendored;
 mod xywh;
 
@@ -32,4 +34,6 @@ pub use playlist::Playlist;
 pub use podcast::{EpisodeList, FeedsList};
 pub use popups::general_search::{GSInputPopup, GSTablePopup, Source};
 pub use progress::Progress;
+pub use status_right::StatusRight;
 pub use tag_editor::*;
+pub use track_details::TrackDetails;

@@ -97,15 +97,13 @@ impl DownloadTracker {
         }
     }
 
-    pub fn message_download_complete(&self) -> String {
+    pub fn message_download_complete(&self, title: Option<&str>) -> String {
         let len = self.len();
+        let what = title.map_or_else(|| "Download".to_string(), |t| format!("{t:^.20}"));
         if len > 0 {
-            format!(
-                " 1 of {} Downloads Completed! {len} are still being processed.",
-                len + 1,
-            )
+            format!(" Downloaded {what}! {len} still being processed.")
         } else {
-            " All Downloads Successfully Completed! ".to_string()
+            format!(" Downloaded {what}! ")
         }
     }
     pub fn message_download_error_response(&self, title: &str) -> String {

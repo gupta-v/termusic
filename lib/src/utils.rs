@@ -49,6 +49,27 @@ pub fn is_playlist(path: &Path) -> bool {
     matches!(ext, "m3u" | "m3u8" | "pls" | "asx" | "xspf")
 }
 
+/// Strip Windows' `\\?\` extended-length ("verbatim") path prefix, if present.
+///
+/// [`Path::canonicalize`] adds this prefix on Windows, which `mpv`/`ffmpeg` (and most
+/// non-Windows-API-aware tools) don't understand at all - passing such a path to them fails
+/// to open the file entirely. This is a no-op on other platforms and on paths that don't have
+/// the prefix.
+#[must_use]
+pub fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    if cfg!(windows) {
+        let s = path.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+    }
+
+    path
+}
+
 /// Get the parent path of the given `path`, if there is none use the tempdir
 #[must_use]
 pub fn get_parent_folder(path: &Path) -> Cow<'_, Path> {

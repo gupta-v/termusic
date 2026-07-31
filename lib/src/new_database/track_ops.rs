@@ -89,7 +89,9 @@ impl TrackRead {
         file_name.push(&self.file_ext);
         path.push(file_name);
 
-        path
+        // Strip in case this row was inserted before `scan_path` stopped storing the
+        // Windows `\\?\` verbatim prefix, so already-populated databases self-heal on read.
+        crate::utils::strip_verbatim_prefix(path)
     }
 }
 

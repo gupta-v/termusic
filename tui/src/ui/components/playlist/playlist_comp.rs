@@ -23,7 +23,6 @@ use termusiclib::player::{
 use termusiclib::track::DurationFmtShort;
 use termusiclib::track::Track;
 use termusiclib::utils::{filetype_supported, is_playlist, playlist_get_vec};
-use tui_realm_stdlib::prop_ext::CommonHighlight;
 use tuirealm::component::{AppComponent, Component};
 use tuirealm::event::Event;
 use tuirealm::event::{Key, KeyEvent};
@@ -229,9 +228,13 @@ impl Playlist {
                 .inactive_style(Style::new().bg(config.settings.theme.playlist_background()))
                 .title(Title::from(" Playlist ").alignment(HorizontalAlignment::Left))
                 .highlight_style(
-                    CommonHighlight::default()
-                        .style
-                        .fg(config.settings.theme.playlist_highlight()),
+                    // Not using `CommonHighlight::default()` (REVERSED modifier) here:
+                    // that swaps fg/bg at render time, turning the highlight color into
+                    // a solid block with dark text instead of glowing colored text.
+                    Style::new()
+                        .fg(config.settings.theme.playlist_highlight())
+                        .bg(config.settings.theme.playlist_background())
+                        .bold(),
                 )
                 .highlight_symbol(
                     config
@@ -646,6 +649,7 @@ impl Model {
         self.playback.playlist.write().set_loop_mode(loop_mode);
         self.config_server.write().settings.player.loop_mode = loop_mode;
         self.playlist_update_title();
+        self.progress_update_title();
         // Force a redraw as stream updates are not part of the "tick" event and so cant send "Msg"
         // but need a redraw because ofthe title change
         self.force_redraw();

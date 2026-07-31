@@ -3,12 +3,13 @@ use std::sync::{Arc, LazyLock};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use id3::TagLike;
 use id3::Version::Id3v24;
 use regex::Regex;
+use serde_json::Value;
 use shell_words;
-use termusiclib::invidious::{Instance, YoutubeVideo};
+use termusiclib::invidious::YoutubeVideo;
 use termusiclib::track::DurationFmtShort;
 use termusiclib::utils::get_parent_folder;
 use tuirealm::props::{
@@ -20,18 +21,24 @@ use super::Model;
 use crate::ui::ids::Id;
 use crate::ui::msg::{Msg, YSMsg};
 
+/// How many results are shown per page in the search popup.
+const RESULTS_PER_PAGE: usize = 5;
+/// How many results to fetch from `yt-dlp` per search (a few pages' worth).
+const RESULTS_TO_FETCH: usize = 15;
+
 // static RE_FILENAME_YTDLP: LazyLock<Regex> =
 //     LazyLock::new(|| Regex::new(r"\[ExtractAudio\] Destination: (?P<name>.*)\.mp3").unwrap());
 
 static RE_FILENAME_YTDLP: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[ExtractAudio\] Destination: (?P<name>.*?\.mp3)").unwrap());
+    LazyLock::new(|| Regex::new(r"\[ExtractAudio\] Destination: (?P<name>.*?\.opus)").unwrap());
 
 static RE_FILENAME_YTDLP_DUPLICATE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\[ExtractAudio\] Not converting audio (?P<name>.*?\.mp3)").unwrap()
+    Regex::new(r"\[ExtractAudio\] Not converting audio (?P<name>.*?\.opus)").unwrap()
 });
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct YoutubeData {
+    /// All fetched results (not just the currently-shown page).
     pub items: Vec<YoutubeVideo>,
     pub page: u32,
 }
@@ -48,50 +55,47 @@ impl Default for YoutubeData {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct YoutubeOptions {
     pub data: YoutubeData,
-    pub invidious_instance: Instance,
 }
 
 impl YoutubeOptions {
-    pub fn get_by_index(&self, index: usize) -> Result<&YoutubeVideo> {
-        if let Some(item) = self.data.items.get(index) {
-            return Ok(item);
-        }
-        Err(anyhow!("index not found"))
+    /// Get an item by its index within the currently-displayed page (0-based).
+    pub fn get_by_index(&self, page_relative_index: usize) -> Result<&YoutubeVideo> {
+        let absolute_index = self.page_start() + page_relative_index;
+        self.data
+            .items
+            .get(absolute_index)
+            .ok_or_else(|| anyhow!("index not found"))
     }
 
-    /// Fetch the previous page's content if there is a previous page.
-    ///
-    /// The returned Future does not need the lifetime of `self` for the fetch and is safe to [`Send`].
-    pub fn get_prev_page(&self) -> Option<impl Future<Output = Result<YoutubeData>> + use<>> {
+    /// Move to the previous page, if any. All results are already fetched, so this is instant.
+    pub fn go_prev_page(&mut self) -> bool {
         if self.data.page > 1 {
-            let mut res = YoutubeData {
-                page: self.data.page - 1,
-                ..Default::default()
-            };
-            let instance = self.invidious_instance.clone();
-
-            return Some(async move {
-                res.items = instance.get_search_query(res.page).await?;
-                Ok(res)
-            });
+            self.data.page -= 1;
+            true
+        } else {
+            false
         }
-
-        None
     }
 
-    /// Fetch the next page's content.
-    ///
-    /// The returned Future does not need the lifetime of `self` for the fetch and is safe to [`Send`].
-    pub fn get_next_page(&self) -> impl Future<Output = Result<YoutubeData>> + use<> {
-        let mut res = YoutubeData {
-            page: self.data.page + 1,
-            ..Default::default()
-        };
-        let instance = self.invidious_instance.clone();
+    /// Move to the next page, if any. All results are already fetched, so this is instant.
+    pub fn go_next_page(&mut self) -> bool {
+        if self.data.page < self.last_page() {
+            self.data.page += 1;
+            true
+        } else {
+            false
+        }
+    }
 
-        async move {
-            res.items = instance.get_search_query(res.page).await?;
-            Ok(res)
+    fn page_start(&self) -> usize {
+        (self.data.page as usize - 1) * RESULTS_PER_PAGE
+    }
+
+    fn last_page(&self) -> u32 {
+        if self.data.items.is_empty() {
+            1
+        } else {
+            u32::try_from((self.data.items.len() - 1) / RESULTS_PER_PAGE + 1).unwrap_or(1)
         }
     }
 
@@ -104,8 +108,11 @@ impl YoutubeOptions {
         self.data.items.is_empty()
     }
 
+    /// The items visible on the currently-displayed page.
     pub fn items(&self) -> &[YoutubeVideo] {
-        &self.data.items
+        let start = self.page_start();
+        let end = (start + RESULTS_PER_PAGE).min(self.data.items.len());
+        self.data.items.get(start..end).unwrap_or(&[])
     }
 }
 
@@ -114,24 +121,24 @@ impl Model {
         // download from search result here
         if let Ok(item) = self.youtube_options.get_by_index(index) {
             let url = format!("https://www.youtube.com/watch?v={}", item.video_id);
-            self.youtube_dl(url.as_ref(), current_node)
+            let title = item.title.clone();
+            self.youtube_dl(url.as_ref(), &title, current_node)
                 .context("YTDL Download")?;
         }
         Ok(())
     }
 
     /// This function requires to be run in a tokio Runtime context
+    ///
+    /// Uses `yt-dlp`'s own search extractor (`ytsearchN:query`) instead of the public
+    /// Invidious mirrors, which are frequently bot-walled / rate-limited / offline.
     pub fn youtube_options_search(&mut self, keyword: String) {
         let tx = self.tx_to_main.clone();
         tokio::spawn(async move {
-            match Instance::new(&keyword).await {
-                Ok((instance, result)) => {
+            match ytdlp_search(&keyword, RESULTS_TO_FETCH).await {
+                Ok(items) => {
                     let youtube_options = YoutubeOptions {
-                        data: YoutubeData {
-                            items: result,
-                            page: 1,
-                        },
-                        invidious_instance: instance,
+                        data: YoutubeData { items, page: 1 },
                     };
                     tx.send(Msg::YoutubeSearch(YSMsg::YoutubeSearchSuccess(
                         youtube_options,
@@ -146,44 +153,18 @@ impl Model {
         });
     }
 
-    /// This function requires to be run in a tokio Runtime context
-    pub fn youtube_options_prev_page(&self) {
-        let tx_to_main = self.tx_to_main.clone();
-
-        let Some(fut) = self.youtube_options.get_prev_page() else {
-            return;
-        };
-
-        tokio::task::spawn(async move {
-            match fut.await {
-                Ok(data) => {
-                    let _ = tx_to_main.send(Msg::YoutubeSearch(YSMsg::PageLoaded(data)));
-                }
-                Err(err) => {
-                    let _ =
-                        tx_to_main.send(Msg::YoutubeSearch(YSMsg::PageLoadError(err.to_string())));
-                }
-            }
-        });
+    /// Move to the previous page of already-fetched results. Instant, no network needed.
+    pub fn youtube_options_prev_page(&mut self) {
+        if self.youtube_options.go_prev_page() {
+            self.sync_youtube_options();
+        }
     }
 
-    /// This function requires to be run in a tokio Runtime context
+    /// Move to the next page of already-fetched results. Instant, no network needed.
     pub fn youtube_options_next_page(&mut self) {
-        let tx_to_main = self.tx_to_main.clone();
-
-        let fut = self.youtube_options.get_next_page();
-
-        tokio::task::spawn(async move {
-            match fut.await {
-                Ok(data) => {
-                    let _ = tx_to_main.send(Msg::YoutubeSearch(YSMsg::PageLoaded(data)));
-                }
-                Err(err) => {
-                    let _ =
-                        tx_to_main.send(Msg::YoutubeSearch(YSMsg::PageLoadError(err.to_string())));
-                }
-            }
-        });
+        if self.youtube_options.go_next_page() {
+            self.sync_youtube_options();
+        }
     }
 
     pub fn sync_youtube_options(&mut self) {
@@ -228,41 +209,51 @@ impl Model {
             )
             .ok();
 
-        if let Some(domain) = &self.youtube_options.invidious_instance.domain {
-            let title = format!(
-                "\u{2500}\u{2500}\u{2500} Page {} \u{2500}\u{2500}\u{2500}\u{2524} {} \u{251c}\u{2500}\u{2500} {} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
-                self.youtube_options.page(),
-                "Tab/Shift+Tab switch pages",
-                domain,
-            );
-            self.app
-                .attr(
-                    &Id::YoutubeSearchTablePopup,
-                    Attribute::Title,
-                    AttrValue::Title(Title::from(title).alignment(HorizontalAlignment::Left)),
-                )
-                .ok();
-        }
+        let title = format!(
+            "\u{2500}\u{2500}\u{2500} Page {} \u{2500}\u{2500}\u{2500}\u{2524} {} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+            self.youtube_options.page(),
+            "Tab/Shift+Tab switch pages",
+        );
+        self.app
+            .attr(
+                &Id::YoutubeSearchTablePopup,
+                Attribute::Title,
+                AttrValue::Title(Title::from(title).alignment(HorizontalAlignment::Left)),
+            )
+            .ok();
     }
 
     #[allow(clippy::too_many_lines)]
-    pub fn youtube_dl(&mut self, url: &str, current_node: &Path) -> Result<()> {
+    pub fn youtube_dl(&mut self, url: &str, title: &str, current_node: &Path) -> Result<()> {
         let path: PathBuf = get_parent_folder(current_node).into_owned();
         let config_tui = self.config_tui.read();
         let mut args = vec![
             Arg::new("--no-playlist"),
             Arg::new("--extract-audio"),
-            // Arg::new_with_arg("--audio-format", "vorbis"),
-            Arg::new_with_arg("--audio-format", "mp3"),
+            Arg::new_with_arg("--audio-format", "opus"),
             Arg::new("--add-metadata"),
-            Arg::new("--embed-thumbnail"),
-            Arg::new_with_arg("--metadata-from-title", "%(artist) - %(title)s"),
+            // NOT --embed-thumbnail: embedding a picture into the Opus/Ogg container corrupts
+            // its Ogg page framing for `lofty` (the metadata reader termusic uses) - it throws
+            // `OggPage(MissingMagic)` and title/artist/duration/lyrics all silently read as
+            // empty, even though ffmpeg/ffprobe still play the file fine. `--write-thumbnail`
+            // alone (a separate .webp next to the track) avoids this entirely.
+            Arg::new("--write-thumbnail"),
+            // Fallback artist = channel/uploader name, applied first so the title-split rule
+            // below can override it when the video's title actually contains "Artist - Title"
+            // (many videos, especially non-music-panel ones, have no artist tag otherwise).
+            Arg::new_with_arg("--parse-metadata", "%(uploader)s:%(meta_artist)s"),
+            Arg::new_with_arg("--metadata-from-title", "%(artist)s - %(title)s"),
             #[cfg(target_os = "windows")]
             Arg::new("--restrict-filenames"),
             Arg::new("--write-sub"),
             Arg::new("--all-subs"),
             Arg::new_with_arg("--convert-subs", "lrc"),
             Arg::new_with_arg("--output", "%(title).90s.%(ext)s"),
+            // Note: deliberately NOT ".thumbnails" - that name is already used by termusic's
+            // own internal album-art cache directory (has a `.database_uuid` marker file and
+            // numeric-ID-keyed images); reusing it would mix arbitrary download filenames into
+            // that system-managed cache.
+            Arg::new_with_arg("--output", "thumbnail:.yt-thumbnails/%(title).90s.%(ext)s"),
         ];
         let extra_args = parse_args(&config_tui.settings.ytdlp.extra_args)
             .context("Parsing config `extra_ytdlp_args`")?;
@@ -276,11 +267,12 @@ impl Model {
 
         // avoid full string clones when sending via a channel
         let url: Arc<str> = Arc::from(url);
+        let title = title.to_string();
 
         thread::spawn(move || -> Result<()> {
             tx.send(Msg::YoutubeSearch(YSMsg::Download(YTDLMsg::Start(
                 url.clone(),
-                "youtube music".to_string(),
+                title.clone(),
             ))))
             .ok();
             // start download
@@ -293,6 +285,7 @@ impl Model {
                     // eprintln!("{}", result.output());
                     tx.send(Msg::YoutubeSearch(YSMsg::Download(YTDLMsg::Success(
                         url.clone(),
+                        title.clone(),
                     ))))
                     .ok();
                     // here we extract the full file name from download output
@@ -335,6 +328,62 @@ impl Model {
     }
 }
 
+/// Search YouTube via `yt-dlp`'s own search extractor (`ytsearchN:query`), bypassing the
+/// public Invidious mirrors entirely (they are frequently bot-walled, rate-limited, or
+/// simply offline - see the fallback list in `termusiclib::invidious`).
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+async fn ytdlp_search(query: &str, count: usize) -> Result<Vec<YoutubeVideo>> {
+    let search_spec = format!("ytsearch{count}:{query}");
+
+    let output = tokio::process::Command::new("yt-dlp")
+        .args([
+            "--flat-playlist",
+            "--dump-json",
+            "--no-warnings",
+            "--skip-download",
+            &search_spec,
+        ])
+        .output()
+        .await
+        .context("Failed to run yt-dlp (is it installed and on PATH?)")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("yt-dlp search failed: {stderr}");
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let results: Vec<YoutubeVideo> = stdout
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter_map(|entry| {
+            let video_id = entry.get("id")?.as_str()?.to_string();
+            let title = entry
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("Unknown title")
+                .to_string();
+            let length_seconds = entry
+                .get("duration")
+                .and_then(Value::as_f64)
+                .map_or(0, |d| d as u64);
+
+            Some(YoutubeVideo {
+                title,
+                length_seconds,
+                video_id,
+            })
+        })
+        .collect();
+
+    if results.is_empty() {
+        bail!("No results found (or yt-dlp's output could not be parsed)");
+    }
+
+    Ok(results)
+}
+
 pub type YTDLMsgURL = Arc<str>;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -345,8 +394,8 @@ pub enum YTDLMsg {
     Start(YTDLMsgURL, String),
     /// Indicates the Download was a Success, though termusic post-processing is not done yet.
     ///
-    /// `(Url)`
-    Success(YTDLMsgURL),
+    /// `(Url, Title)`
+    Success(YTDLMsgURL, String),
     /// Indicates the Download thread finished in both Success or Error.
     ///
     /// `(Url, Filename)`
@@ -405,6 +454,14 @@ fn remove_downloaded_json(path: &Path, file_fullname: &str) {
 }
 
 fn embed_downloaded_lrc(path: &Path, file_fullname: &str) {
+    // ID3v2 is an MP3-specific tagging format; writing it into an Opus/Ogg file corrupts the
+    // Ogg container's page framing (lofty then fails to read ANY metadata at all - title,
+    // artist, duration, everything). Since yt-dlp downloads are always opus, just leave any
+    // `.lrc` files as plain sidecar files instead of embedding (and corrupting).
+    if Path::new(file_fullname).extension().and_then(|e| e.to_str()) != Some("mp3") {
+        return;
+    }
+
     let mut id3_tag = if let Ok(tag) = id3::Tag::read_from_path(file_fullname) {
         tag
     } else {
@@ -555,11 +612,11 @@ mod tests {
         // );
         assert_eq!(
             extract_filepath(
-                r"sdflsdf [ExtractAudio] Destination: 观众说“小哥哥，到饭点了”《干饭人之歌》走，端起饭盆干饭去.mp3 sldflsdfj",
+                r"sdflsdf [ExtractAudio] Destination: 观众说“小哥哥，到饭点了”《干饭人之歌》走，端起饭盆干饭去.opus sldflsdfj",
                 "/tmp"
             )
             .unwrap(),
-            "/tmp/观众说“小哥哥，到饭点了”《干饭人之歌》走，端起饭盆干饭去.mp3".to_string()
+            "/tmp/观众说“小哥哥，到饭点了”《干饭人之歌》走，端起饭盆干饭去.opus".to_string()
         );
     }
 }

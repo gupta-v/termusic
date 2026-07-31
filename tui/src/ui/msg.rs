@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 
 use crate::ui::components::TETrack;
 use crate::ui::ids::{IdCEGeneral, IdCETheme, IdConfigEditor, IdKey, IdKeyGlobal, IdKeyOther};
-use crate::ui::model::youtube_options::{YTDLMsg, YoutubeData, YoutubeOptions};
+use crate::ui::model::youtube_options::{YTDLMsg, YoutubeOptions};
 
 /// Main message type that encapsulates everything else.
 // Note that the style is for each thing to have a sub-type, unless it is top-level like "ForceRedraw".
@@ -719,13 +719,9 @@ pub enum YSMsg {
     InputPopupCloseCancel,
     InputPopupCloseOk(String, PathBuf),
 
+    /// Move to the next/previous page of already-fetched search results (local, no re-fetch).
     ReqNextPage,
     ReqPreviousPage,
-    PageLoaded(YoutubeData),
-    /// Indicates that the youtube search page load has failed, with error message.
-    ///
-    /// `(ErrorAsString)`
-    PageLoadError(String),
 
     TablePopupCloseCancel,
     TablePopupCloseOk(usize, PathBuf),

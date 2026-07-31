@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use termusiclib::config::v2::server::ScanDepth;
+use termusiclib::utils::filetype_supported;
 use tuirealm_orx_tree::types::{NodeIdx, Tree};
 
 use crate::ui::{
@@ -92,10 +93,7 @@ fn library_dir_tree_inner(path: &Path, depth: ScanDepth, is_dir: Option<bool>) -
             // filter out hidden files and files without playback
             .filter(|p| {
                 !p.file_name().to_string_lossy().starts_with('.')
-                    && (p.path().is_dir()
-                        || mime_guess::from_path(p.path())
-                            .first()
-                            .is_some_and(|f| f.type_() == mime_guess::mime::AUDIO))
+                    && (p.path().is_dir() || filetype_supported(&p.path()))
             })
             .map(|v| {
                 let sort_str = get_pin_yin(&v.file_name().to_string_lossy());

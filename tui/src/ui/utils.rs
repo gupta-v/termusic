@@ -85,6 +85,32 @@ pub fn draw_area_top_right_absolute(parent: Rect, width: u16, height: u16) -> Re
     .split(new_area[1])[1]
 }
 
+/// Anchor a `width`x`height` area to the bottom-right, `bottom_margin` rows above the
+/// bottom edge (e.g. to sit directly above a fixed-height panel like the Lyric view).
+pub fn draw_area_bottom_right_absolute(
+    parent: Rect,
+    width: u16,
+    height: u16,
+    bottom_margin: u16,
+) -> Rect {
+    let top_gap = parent
+        .height
+        .saturating_sub(height)
+        .saturating_sub(bottom_margin);
+    let new_area = Layout::vertical([
+        Constraint::Length(top_gap),
+        Constraint::Length(height),
+        Constraint::Length(bottom_margin),
+    ])
+    .split(parent);
+    Layout::horizontal([
+        Constraint::Length(parent.width - width - 1),
+        Constraint::Length(width),
+        Constraint::Length(1),
+    ])
+    .split(new_area[1])[1]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -98,9 +98,10 @@ impl Database {
         config: &ServerOverlay,
         replace_metadata: bool,
     ) -> Result<()> {
-        let path = path
-            .canonicalize()
-            .with_context(|| path.display().to_string())?;
+        let path = crate::utils::strip_verbatim_prefix(
+            path.canonicalize()
+                .with_context(|| path.display().to_string())?,
+        );
 
         let walker = {
             let mut walker = walkdir::WalkDir::new(&path).follow_links(true);

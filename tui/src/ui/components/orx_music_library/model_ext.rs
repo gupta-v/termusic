@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use termusiclib::config::v2::server::{ScanDepth, config_extra::ServerConfigVersionedDefaulted};
+use termusiclib::utils::filetype_supported;
 use tuirealm::{
     props::{LineStatic, TableBuilder},
     subscription::{EventClause, Sub, SubClause},
@@ -55,6 +56,9 @@ fn library_subs() -> Vec<Sub<Id, UserEvent>> {
             )))),
             SubClause::Always,
         ),
+        // Drives the marquee-scroll of the currently-selected row's name, see
+        // `OrxMusicLibraryComponent::on`'s `Event::Tick` handling.
+        Sub::new(EventClause::Tick, SubClause::Always),
     ]
 }
 
@@ -165,6 +169,17 @@ impl Model {
         let search = wildmatch::WildMatch::new(&search);
         for record in all_items.into_iter().filter_map(std::result::Result::ok) {
             let file_name = record.path();
+
+            // Skip anything inside a dot-prefixed directory (e.g. `.thumbnails`,
+            // `.yt-thumbnails`) and any non-audio file, mirroring the library tree's own
+            // filtering (see `scanner.rs`) - this walker has none of that on its own.
+            let in_hidden_dir = file_name
+                .components()
+                .any(|c| c.as_os_str().to_string_lossy().starts_with('.'));
+            if in_hidden_dir || (file_name.is_file() && !filetype_supported(file_name)) {
+                continue;
+            }
+
             if search.matches(&file_name.to_string_lossy().to_lowercase()) {
                 if idx > 0 {
                     table.add_row();

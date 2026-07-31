@@ -9,13 +9,13 @@ use tuirealm::listener::EventListenerCfg;
 use tuirealm::props::{AttrValue, Attribute, Color, PropPayload, PropValue, SpanStatic, Style};
 use tuirealm::ratatui::Frame;
 use tuirealm::ratatui::layout::{Constraint, Layout};
-use tuirealm::ratatui::widgets::Clear;
+use tuirealm::ratatui::widgets::{Block, BorderType as RtBorderType, Borders as RtBorders, Clear};
 use tuirealm::subscription::{EventClause, Sub, SubClause};
 use tuirealm::terminal::TerminalAdapter;
 
 use crate::ui::components::{
     DBListCriteria, DownloadSpinner, EpisodeList, FeedsList, Footer, GSInputPopup, GSTablePopup,
-    Lyric, Playlist, Progress, Source,
+    Lyric, Playlist, Progress, Source, StatusRight, TrackDetails,
 };
 use crate::ui::ids::{Id, IdConfigEditor, IdTagEditor};
 use crate::ui::model::ports::rx_main::PortRxMain;
@@ -23,7 +23,7 @@ use crate::ui::model::ports::stream_events::PortStreamEvents;
 use crate::ui::model::{Model, TermusicLayout, UserEvent};
 use crate::ui::msg::{Msg, PCMsg};
 use crate::ui::utils::{
-    draw_area_in_absolute, draw_area_in_relative, draw_area_top_right_absolute,
+    draw_area_bottom_right_absolute, draw_area_in_absolute, draw_area_in_relative,
 };
 
 impl Model {
@@ -66,6 +66,16 @@ impl Model {
         self.app.mount(
             Id::Lyric,
             Box::new(Lyric::new(self.config_tui.clone())),
+            Vec::new(),
+        )?;
+        self.app.mount(
+            Id::TrackDetails,
+            Box::new(TrackDetails::new(&self.config_tui)),
+            Vec::new(),
+        )?;
+        self.app.mount(
+            Id::StatusRight,
+            Box::new(StatusRight::new(&self.config_tui.read())),
             Vec::new(),
         )?;
 
@@ -199,23 +209,86 @@ impl Model {
     fn view_layout_treeview(&mut self) {
         self.terminal
             .draw(|f| {
-                let [chunks_main, _bottom_help] =
-                    Layout::vertical([Constraint::Min(2), Constraint::Length(1)]).areas(f.area());
-                let [left_library, right] =
-                    Layout::horizontal([Constraint::Ratio(1, 3), Constraint::Ratio(2, 3)])
-                        .areas(chunks_main);
-                let [right_playlist, right_progress, right_lyric] = Layout::vertical([
-                    Constraint::Min(2),
+                // Main content (90%) / bottom status bar (10%) / 1-line help footer.
+                // Status bar is a fixed small height regardless of terminal size (a Gauge
+                // widget fills its *entire* given height as a solid color block, so letting
+                // it scale with the window turns it into an oversized rectangle at large
+                // terminal sizes). Main content just takes whatever is left.
+                let [main_area, status_bar, _bottom_help] = Layout::vertical([
+                    Constraint::Min(0),
                     Constraint::Length(3),
-                    Constraint::Length(4),
+                    Constraint::Length(1),
+                ])
+                .areas(f.area());
+
+                // Library (30%) / Playlist (50%) / right column (20%).
+                let [left_library, center_playlist, right] = Layout::horizontal([
+                    Constraint::Percentage(30),
+                    Constraint::Percentage(50),
+                    Constraint::Percentage(20),
+                ])
+                .areas(main_area);
+
+                // Right column: Cover art (30%) / Details (30%) / Lyrics (20%).
+                let [right_cover, right_details, right_lyric] = Layout::vertical([
+                    Constraint::Fill(3),
+                    Constraint::Fill(3),
+                    Constraint::Fill(2),
                 ])
                 .areas(right);
 
                 self.app.view(&Id::Library, f, left_library);
+                self.app.view(&Id::Playlist, f, center_playlist);
 
-                self.app.view(&Id::Playlist, f, right_playlist);
-                self.app.view(&Id::Progress, f, right_progress);
+                // Cover art is drawn directly to the terminal via viuer (not through the
+                // tui-realm widget tree), so just reserve the bordered panel here and let
+                // `Model::show_image` fit the image into `cover_area` on the next update.
+                let cover_block = Block::default()
+                    .borders(RtBorders::ALL)
+                    .border_type(RtBorderType::Rounded)
+                    .title(" Cover ");
+                let cover_inner = cover_block.inner(right_cover);
+                f.render_widget(cover_block, right_cover);
+                self.cover_area = Some(cover_inner);
+
+                if self.cover_placeholder {
+                    // Centered "TwT" placeholder so a track with no cover art doesn't just
+                    // leave the previous track's image lingering on screen.
+                    let [_top, mid, _bottom] = Layout::vertical([
+                        Constraint::Fill(1),
+                        Constraint::Length(1),
+                        Constraint::Fill(1),
+                    ])
+                    .areas(cover_inner);
+                    // Fullwidth forms render roughly 2x as wide as normal Latin letters in
+                    // most terminal fonts - the simplest way to make plain text feel "bigger"
+                    // without a font-rendering dependency.
+                    let placeholder = tuirealm::ratatui::widgets::Paragraph::new("Ｔｗ Ｔ")
+                        .alignment(tuirealm::ratatui::layout::Alignment::Center)
+                        .style(Style::new().bold());
+                    f.render_widget(placeholder, mid);
+                }
+
+                self.app.view(&Id::TrackDetails, f, right_details);
                 self.app.view(&Id::Lyric, f, right_lyric);
+
+                // Status bar: now-playing (70%, bordered via `Progress`) / volume-speed-
+                // shuffle-repeat readout (30%, bordered here since `Label` can't draw one).
+                let [status_info, status_right] = Layout::horizontal([
+                    Constraint::Percentage(70),
+                    Constraint::Percentage(30),
+                ])
+                .areas(status_bar);
+
+                let status_right_block = Block::default()
+                    .borders(RtBorders::ALL)
+                    .border_type(RtBorderType::Rounded)
+                    .title(" Controls ");
+                let status_right_inner = status_right_block.inner(status_right);
+                f.render_widget(status_right_block, status_right);
+
+                self.app.view(&Id::Progress, f, status_info);
+                self.app.view(&Id::StatusRight, f, status_right_inner);
 
                 Self::view_layout_commons(f, &mut self.app, self.download_tracker.visible());
             })
@@ -319,7 +392,9 @@ impl Model {
             app.view(&Id::DatabaseAddConfirmPopup, f, popup);
         }
         if app.mounted(&Id::MessagePopup) {
-            let popup = draw_area_top_right_absolute(f.area(), 25, 4);
+            // Anchored just above the 1-line help footer (bottom bar is now the full-width
+            // status bar, not a fixed-height lyric panel, so there's no fixed height to sit above).
+            let popup = draw_area_bottom_right_absolute(f.area(), 25, 4, 1);
             f.render_widget(Clear, popup);
             app.view(&Id::MessagePopup, f, popup);
         }

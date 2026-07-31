@@ -143,7 +143,7 @@ impl Model {
             TrackDLMsg::Success(url) => {
                 self.download_tracker.decrease_one(&url);
                 self.show_message_timeout_label_help(
-                    self.download_tracker.message_download_complete(),
+                    self.download_tracker.message_download_complete(None),
                     None,
                     None,
                     None,
