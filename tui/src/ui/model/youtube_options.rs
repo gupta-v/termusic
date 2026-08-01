@@ -328,7 +328,7 @@ impl Model {
     }
 }
 
-/// Search YouTube via `yt-dlp`'s own search extractor (`ytsearchN:query`), bypassing the
+/// Search `YouTube` via `yt-dlp`'s own search extractor (`ytsearchN:query`), bypassing the
 /// public Invidious mirrors entirely (they are frequently bot-walled, rate-limited, or
 /// simply offline - see the fallback list in `termusiclib::invidious`).
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -458,7 +458,11 @@ fn embed_downloaded_lrc(path: &Path, file_fullname: &str) {
     // Ogg container's page framing (lofty then fails to read ANY metadata at all - title,
     // artist, duration, everything). Since yt-dlp downloads are always opus, just leave any
     // `.lrc` files as plain sidecar files instead of embedding (and corrupting).
-    if Path::new(file_fullname).extension().and_then(|e| e.to_str()) != Some("mp3") {
+    if Path::new(file_fullname)
+        .extension()
+        .and_then(|e| e.to_str())
+        != Some("mp3")
+    {
         return;
     }
 

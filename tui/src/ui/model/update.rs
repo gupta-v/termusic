@@ -807,7 +807,8 @@ impl Model {
             YTDLMsg::Success(url, title) => {
                 self.download_tracker.decrease_one(&url);
                 self.show_message_timeout_label_help(
-                    self.download_tracker.message_download_complete(Some(&title)),
+                    self.download_tracker
+                        .message_download_complete(Some(&title)),
                     None,
                     None,
                     None,

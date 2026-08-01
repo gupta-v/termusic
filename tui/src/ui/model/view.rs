@@ -274,11 +274,9 @@ impl Model {
 
                 // Status bar: now-playing (70%, bordered via `Progress`) / volume-speed-
                 // shuffle-repeat readout (30%, bordered here since `Label` can't draw one).
-                let [status_info, status_right] = Layout::horizontal([
-                    Constraint::Percentage(70),
-                    Constraint::Percentage(30),
-                ])
-                .areas(status_bar);
+                let [status_info, status_right] =
+                    Layout::horizontal([Constraint::Percentage(70), Constraint::Percentage(30)])
+                        .areas(status_bar);
 
                 let status_right_block = Block::default()
                     .borders(RtBorders::ALL)

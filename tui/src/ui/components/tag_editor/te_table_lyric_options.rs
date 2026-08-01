@@ -209,7 +209,7 @@ impl Model {
         self.te_set_results(table).unwrap();
     }
 
-    /// Set TagEditor "Search Results" attribute consistently
+    /// Set `TagEditor` "Search Results" attribute consistently
     fn te_set_results(&mut self, table: tuirealm::props::Table) -> Result<()> {
         self.app.attr(
             &Id::TagEditor(IdTagEditor::TableLyricOptions),
@@ -220,7 +220,7 @@ impl Model {
         Ok(())
     }
 
-    /// Set TagEditor "Search Results" to "Loading"
+    /// Set `TagEditor` "Search Results" to "Loading"
     fn te_set_loading_results(&mut self) {
         let table = TableBuilder::default()
             .add_col(LineStatic::from("0"))

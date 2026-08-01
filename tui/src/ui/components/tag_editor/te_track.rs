@@ -53,9 +53,9 @@ impl TryFrom<&Track> for TETrack {
 
         Ok(Self {
             path: track_data.path().to_owned(),
-            artist: value.artist().map(|v| v.to_string()),
-            title: value.title().map(|v| v.to_string()),
-            album: track_data.album().map(|v| v.to_string()),
+            artist: value.artist().map(std::string::ToString::to_string),
+            title: value.title().map(std::string::ToString::to_string),
+            album: track_data.album().map(std::string::ToString::to_string),
             // TODO: init genre
             genre: None,
             picture: None,
@@ -128,7 +128,7 @@ impl TETrack {
     ) {
         if let Some(frame) = self.lyric_frames.get_mut(self.lyric_selected_idx) {
             let description =
-                description.map_or_else(|| std::mem::take(&mut frame.description), |v| v.into());
+                description.map_or_else(|| std::mem::take(&mut frame.description), Into::into);
             *frame = Lyrics {
                 text: content.into(),
                 lang: lang.into(),
@@ -136,7 +136,7 @@ impl TETrack {
             };
         } else {
             let lang = lang.into();
-            let description = description.map_or_else(|| lang.clone(), |v| v.into());
+            let description = description.map_or_else(|| lang.clone(), Into::into);
             self.lyric_frames.push(Lyrics {
                 text: content.into(),
                 lang,
@@ -300,7 +300,7 @@ impl TETrack {
     /// [From the discussion](https://github.com/tramhao/termusic/commit/5f4276c012fa7dff90fa9cbb8bde823df5387ce8):
     /// - Recently I downloaded some tracks from youtube, and they have several languages of lyrics. When I delete one language, the other were saved wrong. The language and description of uslt frame cannot be preserved in lofty tags.
     /// - Theoretically, it should just work in the other way since lofty 0.20.0, see Serial-ATA/lofty-rs#392 (we currently use lofty 0.22.x)
-    /// - Tried with set_lang and set_description of lofty tag but not working. The tag item was modified but after push, lang is set to XXX and description is empty. I'll keep the separate handling of writing for now.
+    /// - Tried with `set_lang` and `set_description` of lofty tag but not working. The tag item was modified but after push, lang is set to XXX and description is empty. I'll keep the separate handling of writing for now.
     fn save_tag_mpeg(&mut self) -> Result<()> {
         let mut tag = Id3v2Tag::default();
         self.set_data_on_tag(&mut tag);

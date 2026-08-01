@@ -113,7 +113,7 @@ impl Model {
 
     /// Overwrite whatever is currently drawn in the Cover panel with a blank opaque image.
     ///
-    /// Only meaningful in the TreeView layout (where `cover_area` is set); other layouts
+    /// Only meaningful in the `TreeView` layout (where `cover_area` is set); other layouts
     /// don't have a dedicated Cover panel to correspond to, so this is a no-op there.
     fn clear_cover_pixels(&mut self) -> Result<()> {
         if self.cover_area.is_none() {
@@ -362,7 +362,7 @@ impl Model {
         Ok(())
     }
 
-    /// Fit `img` into a fixed screen-space rect (the TreeView layout's cover panel),
+    /// Fit `img` into a fixed screen-space rect (the `TreeView` layout's cover panel),
     /// instead of the floating xywh-percentage placement used by [`Self::show_image`].
     #[allow(
         clippy::unnecessary_wraps,
@@ -386,7 +386,7 @@ impl Model {
             transparent: true,
             absolute_offset: true,
             x: area.x,
-            y: area.y as i16,
+            y: area.y.cast_signed(),
             width: Some(width),
             height: Some(height),
             #[cfg(feature = "cover-viuer-iterm")]

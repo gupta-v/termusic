@@ -41,8 +41,10 @@ impl Progress {
                 .inactive(Style::new().fg(config.settings.theme.progress_foreground()))
                 .label("Progress")
                 .title(
-                    Title::from("\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} Stopped ")
-                        .alignment(HorizontalAlignment::Left),
+                    Title::from(
+                        "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} Stopped ",
+                    )
+                    .alignment(HorizontalAlignment::Left),
                 )
                 .progress(0.0),
         }
@@ -57,7 +59,11 @@ impl AppComponent<Msg, UserEvent> for Progress {
 
 /// `1` when the loop mode currently shuffles track order, `0` otherwise.
 fn shuffle_str(loop_mode: LoopMode) -> &'static str {
-    if loop_mode == LoopMode::Random { "1" } else { "0" }
+    if loop_mode == LoopMode::Random {
+        "1"
+    } else {
+        "0"
+    }
 }
 
 /// Repeat state as a 2-bit binary string: `0` = no repeat, `1` = repeat single track,

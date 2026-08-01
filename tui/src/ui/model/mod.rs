@@ -324,7 +324,7 @@ pub struct Model {
     /// instead of the floating `xywh` percentage-of-terminal placement.
     pub cover_area: Option<tuirealm::ratatui::layout::Rect>,
     /// `true` when the current track has no cover art to show (neither embedded nor a sidecar
-    /// thumbnail), so the Cover panel should render a "TwT" placeholder instead of leaving
+    /// thumbnail), so the Cover panel should render a "`TwT`" placeholder instead of leaving
     /// the previous track's image lingering on screen.
     pub cover_placeholder: bool,
 
