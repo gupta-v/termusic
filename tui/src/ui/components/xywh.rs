@@ -133,23 +133,26 @@ impl Model {
             return Ok(());
         }
         self.clear_photo()?;
+        // Whether a real image is currently on screen and needs erasing if this call ends
+        // up not finding one. Only true if the *previous* call actually drew one - if we
+        // were already showing the placeholder, there is nothing to erase.
+        let had_real_cover = !self.cover_placeholder;
         // Assume no cover until one of the branches below actually shows one; this also
         // covers "should_not_show_photo" / "no track" / "no picture found" cases uniformly,
         // so the Cover panel never keeps showing a stale previous track's art.
         self.cover_placeholder = true;
 
         if self.should_not_show_photo() {
+            if had_real_cover {
+                self.clear_cover_pixels()?;
+            }
             return Ok(());
         }
 
-        // Protocol renderers (sixel/kitty/iterm) composite graphics independently of
-        // ratatui's own text-cell redraw, so a leftover image from the previous track isn't
-        // actually erased just because a "TwT" placeholder gets drawn as text on top of it
-        // (see `view_layout_treeview`). Overwrite it with a blank opaque image first; if a
-        // real cover gets found below, it simply overdraws this immediately after.
-        self.clear_cover_pixels()?;
-
         let Some(track) = self.playback.current_track() else {
+            if had_real_cover {
+                self.clear_cover_pixels()?;
+            }
             return Ok(());
         };
 
@@ -163,12 +166,18 @@ impl Model {
                             track_data.path().display(),
                             err
                         );
+                        if had_real_cover {
+                            self.clear_cover_pixels()?;
+                        }
                         return Ok(());
                     }
                 };
                 if let Some(picture) = res
                     && let Ok(image) = image::load_from_memory(picture.data())
                 {
+                    // A full image draw already replaces whatever pixels were there before,
+                    // so there is no need to blank first - doing so would just flash black
+                    // in between every track change that has cover art.
                     self.show_image(&image)?;
                     self.cover_placeholder = false;
                     return Ok(());
@@ -184,8 +193,21 @@ impl Model {
                     self.cover_placeholder = false;
                     return Ok(());
                 }
+
+                // Protocol renderers (sixel/kitty/iterm) composite graphics independently of
+                // ratatui's own text-cell redraw, so a leftover image from the previous
+                // track isn't actually erased just because a "TwT" placeholder gets drawn as
+                // text on top of it (see `view_layout_treeview`) - only reachable here once
+                // we know for sure there is no replacement image to draw instead.
+                if had_real_cover {
+                    self.clear_cover_pixels()?;
+                }
             }
-            MediaTypes::Radio(_radio_track_data) => (),
+            MediaTypes::Radio(_radio_track_data) => {
+                if had_real_cover {
+                    self.clear_cover_pixels()?;
+                }
+            }
             MediaTypes::Podcast(podcast_track_data) => {
                 let url = {
                     if let Some(episode_photo_url) = podcast_track_data.image_url() {
@@ -195,15 +217,24 @@ impl Model {
                     {
                         pod_photo_url
                     } else {
+                        if had_real_cover {
+                            self.clear_cover_pixels()?;
+                        }
                         return Ok(());
                     }
                 };
 
                 if url.is_empty() {
+                    if had_real_cover {
+                        self.clear_cover_pixels()?;
+                    }
                     return Ok(());
                 }
                 let tx = self.tx_to_main.clone();
 
+                // Leave whatever is currently shown up until the async fetch below resolves
+                // (via `CoverDLResult`) instead of blanking now - avoids a flash for the
+                // common case where the fetch succeeds.
                 Handle::current().spawn(Self::fetch_podcast_image(tx, url));
             }
         }

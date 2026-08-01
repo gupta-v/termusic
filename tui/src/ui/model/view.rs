@@ -253,19 +253,29 @@ impl Model {
 
                 if self.cover_placeholder {
                     // Centered "TwT" placeholder so a track with no cover art doesn't just
-                    // leave the previous track's image lingering on screen.
+                    // leave the previous track's image lingering on screen. Drawn as
+                    // block-letter ASCII art (rather than a single line of text) so it reads
+                    // as a "big" glyph despite there being no font-size control in a terminal.
+                    const TWT_ART: [&str; 8] = [
+                        "█████████             █████████",
+                        "    █                     █    ",
+                        "    █                     █    ",
+                        "    █       █     █       █    ",
+                        "    █       █  █  █       █    ",
+                        "    █       █ █ █ █       █    ",
+                        "    █        █   █        █    ",
+                        "    █                     █    ",
+                    ];
                     let [_top, mid, _bottom] = Layout::vertical([
                         Constraint::Fill(1),
-                        Constraint::Length(1),
+                        Constraint::Length(8), // TWT_ART.len()
                         Constraint::Fill(1),
                     ])
                     .areas(cover_inner);
-                    // Fullwidth forms render roughly 2x as wide as normal Latin letters in
-                    // most terminal fonts - the simplest way to make plain text feel "bigger"
-                    // without a font-rendering dependency.
-                    let placeholder = tuirealm::ratatui::widgets::Paragraph::new("Ｔｗ Ｔ")
-                        .alignment(tuirealm::ratatui::layout::Alignment::Center)
-                        .style(Style::new().bold());
+                    let placeholder =
+                        tuirealm::ratatui::widgets::Paragraph::new(TWT_ART.join("\n"))
+                            .alignment(tuirealm::ratatui::layout::Alignment::Center)
+                            .style(Style::new().bold());
                     f.render_widget(placeholder, mid);
                 }
 

@@ -134,10 +134,11 @@ impl Model {
         let config_server = self.config_server.read();
         let player = &config_server.settings.player;
 
-        let title = self
-            .playback
-            .current_track()
-            .map(|track| track.title().unwrap_or("Unknown title").to_string());
+        let title = self.playback.current_track().map(|track| {
+            track
+                .title()
+                .map_or_else(|| track.id_str().into_owned(), ToString::to_string)
+        });
         let progress_title = title_format(self.playback.status(), title.as_deref());
         let status_right = status_right_format(player.volume, player.speed, player.loop_mode);
 

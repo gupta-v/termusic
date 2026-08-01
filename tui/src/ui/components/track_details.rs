@@ -59,7 +59,9 @@ impl Model {
             match track.inner() {
                 MediaTypes::Track(track_data) => TextStatic::from_iter([
                     LineStatic::styled(
-                        track.title().unwrap_or("Unknown Title").to_string(),
+                        track
+                            .title()
+                            .map_or_else(|| track.id_str().into_owned(), ToString::to_string),
                         Style::new().bold(),
                     ),
                     LineStatic::from(format!(
