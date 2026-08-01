@@ -165,7 +165,7 @@ impl Model {
             XYWHMsg::CoverDLResult(msg) => match msg {
                 CoverDLResult::FetchPhotoSuccess(image_wrapper) => {
                     // Queued rather than drawn immediately - see `Model::pending_cover`.
-                    self.pending_cover = Some(crate::ui::components::xywh::PendingCover::Image(
+                    self.pending_cover = Some(crate::ui::components::xywh::PendingCover(
                         image_wrapper.data,
                     ));
                     self.cover_placeholder = false;

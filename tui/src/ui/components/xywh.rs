@@ -24,13 +24,17 @@ use crate::ui::ids::{Id, IdConfigEditor, IdTagEditor};
 use crate::ui::model::{Model, TxToMain, ViuerSupported};
 use crate::ui::msg::{CoverDLResult, ImageWrapper, Msg, XYWHMsg};
 
-/// A cover-art draw/clear decided by [`Model::update_photo`] but deferred - see
-/// [`Model::pending_cover`] for why this can't just be applied immediately.
+/// A cover-art image decided by [`Model::update_photo`] but deferred - see
+/// [`Model::pending_cover`] for why this can't just be drawn immediately.
+///
+/// Only the "found a real image" case needs deferring: it must land *after* ratatui's own
+/// redraw of the Cover panel, otherwise that redraw's erase-old-placeholder-text step
+/// (whenever `cover_placeholder` just flipped to `false`) physically overwrites it. The
+/// opposite direction - clearing back to a blank/placeholder - needs the *reverse* ordering
+/// (clear immediately, so the placeholder text ratatui draws afterwards ends up on top), so
+/// that case is never deferred.
 #[derive(Debug)]
-pub enum PendingCover {
-    Image(DynamicImage),
-    Clear,
-}
+pub struct PendingCover(pub DynamicImage);
 
 /// Look for a `.yt-thumbnails/<same-stem>.<ext>` file next to `track_path`, matching the
 /// output template used for yt-dlp downloads (see `youtube_options.rs`).
@@ -137,16 +141,11 @@ impl Model {
     /// Must be called after this tick's `view()` (i.e. after the terminal's own draw+flush
     /// has already happened) - see [`Model::pending_cover`] for why.
     pub fn flush_pending_cover(&mut self) {
-        let Some(pending) = self.pending_cover.take() else {
+        let Some(PendingCover(image)) = self.pending_cover.take() else {
             return;
         };
 
-        let result = match pending {
-            PendingCover::Image(image) => self.show_image(&image),
-            PendingCover::Clear => self.clear_cover_pixels(),
-        };
-
-        if let Err(err) = result {
+        if let Err(err) = self.show_image(&image) {
             error!("Failed to apply pending cover-art draw: {err}");
         }
     }
@@ -171,14 +170,14 @@ impl Model {
 
         if self.should_not_show_photo() {
             if had_real_cover {
-                self.pending_cover = Some(PendingCover::Clear);
+                self.clear_cover_pixels()?;
             }
             return Ok(());
         }
 
         let Some(track) = self.playback.current_track() else {
             if had_real_cover {
-                self.pending_cover = Some(PendingCover::Clear);
+                self.clear_cover_pixels()?;
             }
             return Ok(());
         };
@@ -194,7 +193,7 @@ impl Model {
                             err
                         );
                         if had_real_cover {
-                            self.pending_cover = Some(PendingCover::Clear);
+                            self.clear_cover_pixels()?;
                         }
                         return Ok(());
                     }
@@ -203,7 +202,7 @@ impl Model {
                     && let Ok(image) = image::load_from_memory(picture.data())
                 {
                     // Queued rather than drawn immediately - see `Model::pending_cover`.
-                    self.pending_cover = Some(PendingCover::Image(image));
+                    self.pending_cover = Some(PendingCover(image));
                     self.cover_placeholder = false;
                     return Ok(());
                 }
@@ -214,7 +213,7 @@ impl Model {
                 if let Some(thumb_path) = sidecar_thumbnail_path(track_data.path())
                     && let Ok(image) = image::open(&thumb_path)
                 {
-                    self.pending_cover = Some(PendingCover::Image(image));
+                    self.pending_cover = Some(PendingCover(image));
                     self.cover_placeholder = false;
                     return Ok(());
                 }
@@ -225,12 +224,12 @@ impl Model {
                 // text on top of it (see `view_layout_treeview`) - only reachable here once
                 // we know for sure there is no replacement image to draw instead.
                 if had_real_cover {
-                    self.pending_cover = Some(PendingCover::Clear);
+                    self.clear_cover_pixels()?;
                 }
             }
             MediaTypes::Radio(_radio_track_data) => {
                 if had_real_cover {
-                    self.pending_cover = Some(PendingCover::Clear);
+                    self.clear_cover_pixels()?;
                 }
             }
             MediaTypes::Podcast(podcast_track_data) => {
@@ -243,7 +242,7 @@ impl Model {
                         pod_photo_url
                     } else {
                         if had_real_cover {
-                            self.pending_cover = Some(PendingCover::Clear);
+                            self.clear_cover_pixels()?;
                         }
                         return Ok(());
                     }
@@ -251,7 +250,7 @@ impl Model {
 
                 if url.is_empty() {
                     if had_real_cover {
-                        self.pending_cover = Some(PendingCover::Clear);
+                        self.clear_cover_pixels()?;
                     }
                     return Ok(());
                 }

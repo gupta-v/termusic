@@ -328,7 +328,7 @@ pub struct Model {
     /// thumbnail), so the Cover panel should render a "`TwT`" placeholder instead of leaving
     /// the previous track's image lingering on screen.
     pub cover_placeholder: bool,
-    /// A cover-art draw/clear decided in [`Model::update_photo`] but not yet applied.
+    /// A cover-art image found by [`Model::update_photo`] but not yet drawn.
     ///
     /// Protocol renderers (sixel/kitty/iterm) write pixels straight to the terminal outside
     /// ratatui's own Buffer. If applied immediately (during message handling, before this
