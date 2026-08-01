@@ -242,6 +242,11 @@ impl Model {
             // below can override it when the video's title actually contains "Artist - Title"
             // (many videos, especially non-music-panel ones, have no artist tag otherwise).
             Arg::new_with_arg("--parse-metadata", "%(uploader)s:%(meta_artist)s"),
+            // Regular (non-Content-ID) videos have no real "album" concept at all - yt-dlp
+            // never sets one on its own - so this would otherwise always end up "Unknown
+            // Album". Reuse the channel/uploader name as a stand-in, same as the artist
+            // fallback above.
+            Arg::new_with_arg("--parse-metadata", "%(uploader)s:%(meta_album)s"),
             Arg::new_with_arg("--metadata-from-title", "%(artist)s - %(title)s"),
             #[cfg(target_os = "windows")]
             Arg::new("--restrict-filenames"),
