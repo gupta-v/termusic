@@ -122,17 +122,20 @@ impl Model {
                 .mounted(&Id::TagEditor(IdTagEditor::TableLyricOptions))
             {
                 self.view_tag_editor();
-                return;
             } else if self.app.mounted(&Id::ConfigEditor(IdConfigEditor::Header)) {
                 self.view_config_editor();
-                return;
+            } else {
+                match self.layout {
+                    TermusicLayout::TreeView => self.view_layout_treeview(),
+                    TermusicLayout::DataBase => self.view_layout_database(),
+                    TermusicLayout::Podcast => self.view_layout_podcast(),
+                }
             }
 
-            match self.layout {
-                TermusicLayout::TreeView => self.view_layout_treeview(),
-                TermusicLayout::DataBase => self.view_layout_database(),
-                TermusicLayout::Podcast => self.view_layout_podcast(),
-            }
+            // Must run after the terminal draw above has fully flushed - see
+            // `Model::pending_cover` for why applying it any earlier can get the just-drawn
+            // cover art overwritten again by ratatui's own redraw of the Cover panel.
+            self.flush_pending_cover();
         }
     }
 

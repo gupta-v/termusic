@@ -27,6 +27,7 @@ use tuirealm::application::Application;
 use tuirealm::terminal::{CrosstermTerminalAdapter, TerminalAdapter, TerminalResult};
 
 use super::components::TETrack;
+use super::components::xywh::PendingCover;
 use super::tui_cmd::TuiCmd;
 use crate::CombinedSettings;
 use crate::ui::ids::Id;
@@ -327,6 +328,16 @@ pub struct Model {
     /// thumbnail), so the Cover panel should render a "`TwT`" placeholder instead of leaving
     /// the previous track's image lingering on screen.
     pub cover_placeholder: bool,
+    /// A cover-art draw/clear decided in [`Model::update_photo`] but not yet applied.
+    ///
+    /// Protocol renderers (sixel/kitty/iterm) write pixels straight to the terminal outside
+    /// ratatui's own Buffer. If applied immediately (during message handling, before this
+    /// tick's `view()` call), ratatui's *own* redraw of the Cover panel that follows right
+    /// after - which unconditionally repaints the panel background/placeholder text based on
+    /// `cover_placeholder` - can physically overwrite the pixels just written. Deferring the
+    /// actual draw to run right after `view()`'s terminal flush guarantees nothing paints
+    /// over it again this tick. See `xywh::PendingCover` and `Model::flush_pending_cover`.
+    pub(crate) pending_cover: Option<PendingCover>,
 
     youtube_options: YoutubeOptions,
     pub download_tracker: DownloadTracker,
@@ -477,6 +488,7 @@ impl Model {
             xywh,
             cover_area: None,
             cover_placeholder: true,
+            pending_cover: None,
         };
 
         model.new_library_scan_dir(path, None);

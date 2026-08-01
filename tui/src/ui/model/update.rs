@@ -164,9 +164,11 @@ impl Model {
             }
             XYWHMsg::CoverDLResult(msg) => match msg {
                 CoverDLResult::FetchPhotoSuccess(image_wrapper) => {
-                    if self.show_image(&image_wrapper.data).is_ok() {
-                        self.cover_placeholder = false;
-                    }
+                    // Queued rather than drawn immediately - see `Model::pending_cover`.
+                    self.pending_cover = Some(crate::ui::components::xywh::PendingCover::Image(
+                        image_wrapper.data,
+                    ));
+                    self.cover_placeholder = false;
                 }
                 CoverDLResult::FetchPhotoErr(err_text) => {
                     self.show_message_timeout_label_help(err_text, None, None, None);

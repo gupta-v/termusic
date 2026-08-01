@@ -24,6 +24,14 @@ use crate::ui::ids::{Id, IdConfigEditor, IdTagEditor};
 use crate::ui::model::{Model, TxToMain, ViuerSupported};
 use crate::ui::msg::{CoverDLResult, ImageWrapper, Msg, XYWHMsg};
 
+/// A cover-art draw/clear decided by [`Model::update_photo`] but deferred - see
+/// [`Model::pending_cover`] for why this can't just be applied immediately.
+#[derive(Debug)]
+pub enum PendingCover {
+    Image(DynamicImage),
+    Clear,
+}
+
 /// Look for a `.yt-thumbnails/<same-stem>.<ext>` file next to `track_path`, matching the
 /// output template used for yt-dlp downloads (see `youtube_options.rs`).
 fn sidecar_thumbnail_path(track_path: &Path) -> Option<PathBuf> {
@@ -124,6 +132,25 @@ impl Model {
         self.show_image(&blank)
     }
 
+    /// Apply a cover-art draw/clear previously queued by [`Model::update_photo`], if any.
+    ///
+    /// Must be called after this tick's `view()` (i.e. after the terminal's own draw+flush
+    /// has already happened) - see [`Model::pending_cover`] for why.
+    pub fn flush_pending_cover(&mut self) {
+        let Some(pending) = self.pending_cover.take() else {
+            return;
+        };
+
+        let result = match pending {
+            PendingCover::Image(image) => self.show_image(&image),
+            PendingCover::Clear => self.clear_cover_pixels(),
+        };
+
+        if let Err(err) = result {
+            error!("Failed to apply pending cover-art draw: {err}");
+        }
+    }
+
     /// Get and show a image for the current playing media
     ///
     /// Requires that the current thread has a entered runtime
@@ -144,14 +171,14 @@ impl Model {
 
         if self.should_not_show_photo() {
             if had_real_cover {
-                self.clear_cover_pixels()?;
+                self.pending_cover = Some(PendingCover::Clear);
             }
             return Ok(());
         }
 
         let Some(track) = self.playback.current_track() else {
             if had_real_cover {
-                self.clear_cover_pixels()?;
+                self.pending_cover = Some(PendingCover::Clear);
             }
             return Ok(());
         };
@@ -167,7 +194,7 @@ impl Model {
                             err
                         );
                         if had_real_cover {
-                            self.clear_cover_pixels()?;
+                            self.pending_cover = Some(PendingCover::Clear);
                         }
                         return Ok(());
                     }
@@ -175,10 +202,8 @@ impl Model {
                 if let Some(picture) = res
                     && let Ok(image) = image::load_from_memory(picture.data())
                 {
-                    // A full image draw already replaces whatever pixels were there before,
-                    // so there is no need to blank first - doing so would just flash black
-                    // in between every track change that has cover art.
-                    self.show_image(&image)?;
+                    // Queued rather than drawn immediately - see `Model::pending_cover`.
+                    self.pending_cover = Some(PendingCover::Image(image));
                     self.cover_placeholder = false;
                     return Ok(());
                 }
@@ -189,7 +214,7 @@ impl Model {
                 if let Some(thumb_path) = sidecar_thumbnail_path(track_data.path())
                     && let Ok(image) = image::open(&thumb_path)
                 {
-                    self.show_image(&image)?;
+                    self.pending_cover = Some(PendingCover::Image(image));
                     self.cover_placeholder = false;
                     return Ok(());
                 }
@@ -200,12 +225,12 @@ impl Model {
                 // text on top of it (see `view_layout_treeview`) - only reachable here once
                 // we know for sure there is no replacement image to draw instead.
                 if had_real_cover {
-                    self.clear_cover_pixels()?;
+                    self.pending_cover = Some(PendingCover::Clear);
                 }
             }
             MediaTypes::Radio(_radio_track_data) => {
                 if had_real_cover {
-                    self.clear_cover_pixels()?;
+                    self.pending_cover = Some(PendingCover::Clear);
                 }
             }
             MediaTypes::Podcast(podcast_track_data) => {
@@ -218,7 +243,7 @@ impl Model {
                         pod_photo_url
                     } else {
                         if had_real_cover {
-                            self.clear_cover_pixels()?;
+                            self.pending_cover = Some(PendingCover::Clear);
                         }
                         return Ok(());
                     }
@@ -226,7 +251,7 @@ impl Model {
 
                 if url.is_empty() {
                     if had_real_cover {
-                        self.clear_cover_pixels()?;
+                        self.pending_cover = Some(PendingCover::Clear);
                     }
                     return Ok(());
                 }

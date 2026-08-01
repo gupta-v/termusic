@@ -22,7 +22,7 @@ mod status_right;
 mod tag_editor;
 mod track_details;
 mod vendored;
-mod xywh;
+pub(crate) mod xywh;
 
 // -- export
 pub use config_editor::*;
